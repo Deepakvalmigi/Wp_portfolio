@@ -199,7 +199,20 @@ class Fetch_Urls_Task extends Task {
 		$origin_url      = Util::origin_url();
 		$destination_url = $this->options->get_destination_url();
 		$current_url     = $static_page->url;
-		$redirect_url    = remove_query_arg( 'simply_static_page', $static_page->redirect_url );
+
+		// Remove simply_static_page parameter from the redirect URL
+		$redirect_url = $static_page->redirect_url;
+
+		// First try standard removal for normal query parameters
+		$redirect_url = remove_query_arg( 'simply_static_page', $redirect_url );
+
+		// Also handle cases where simply_static_page is embedded in another parameter
+		// Look for patterns like %3Fsimply_static_page%3D12345 (URL-encoded ?simply_static_page=12345)
+		$redirect_url = preg_replace( '/%3Fsimply_static_page%3D\d+/i', '', $redirect_url );
+
+		// Handle standard query string formats
+		$redirect_url = preg_replace( '/\?simply_static_page=\d+/i', '', $redirect_url );
+		$redirect_url = preg_replace( '/&simply_static_page=\d+/i', '', $redirect_url );
 
 		Util::debug_log( "redirect_url: " . $redirect_url );
 
@@ -279,11 +292,20 @@ class Fetch_Urls_Task extends Task {
 	 * @return bool
 	 */
 	public function find_excludable( $static_page ) {
-		$excluded = array( '.php', 'debug' );
+		$excluded = array( '.php' );
+		$url = $static_page->url;
+
+		// Exclude debug files (.log, .txt) but not robots.txt
+		if ( preg_match( '/\.(log|txt)$/i', $url ) && strpos( $url, 'debug' ) !== false && strpos( $url, 'robots.txt' ) === false ) {
+			return true;
+		}
 
 		// Exclude feeds if add_feeds is not true.
 		if ( ! $this->options->get( 'add_feeds' ) ) {
-			$excluded[] = 'feed';
+			// Only exclude WordPress XML feeds (ending with /feed/ or ?feed= parameter)
+			if ( preg_match( '/(\/feed\/?$|\?feed=|\/feed\/|\/rss\/?$|\/atom\/?$)/i', $url ) ) {
+				return true;
+			}
 		}
 
 		// Exclude Rest API if add_rest_api is not true.
@@ -311,8 +333,6 @@ class Fetch_Urls_Task extends Task {
 
 		if ( ! empty( $excluded ) ) {
 			foreach ( $excluded as $excludable ) {
-				$url = $static_page->url;
-
 				if ( strpos( $url, $excludable ) !== false ) {
 					return true;
 				}
